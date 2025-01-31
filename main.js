@@ -24,6 +24,10 @@ app.use("/api/intercept", interceptRoutes);
 app.use("/api/problematic", problematicRoutes);
 app.use("/api/replay", json_copy);
 
+app.get("/api", (req, res) => {
+  res.json({ message: "Custom API response" });
+});
+
 // Start the server
 app.listen(PORT, () => {
   console.log(`Server is running at http://localhost:${PORT}`);
