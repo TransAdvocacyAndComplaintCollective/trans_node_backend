@@ -4,11 +4,11 @@ require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const db = require("./config/db"); // Database connection pool
-const complaintRoutes = require("./api/complaint");
-const replyRoutes = require("./api/replies");
-const interceptRoutes = require("./api/intercept");
-const problematicRoutes = require("./api/problematic");
-const json_copy = require("./api/json_copy");
+const complaintRoutes = require("./routes/complaint");
+const replyRoutes = require("./routes/replies");
+const interceptRoutes = require("./routes/intercept");
+const problematicRoutes = require(".routes/routes/problematic");
+const json_copy = require("./routes/json_copy");
 
 const app = express();
 const PORT = process.env.SERVER_PORT || process.env.PORT || 5555;
