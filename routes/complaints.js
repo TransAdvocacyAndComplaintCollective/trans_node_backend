@@ -9,10 +9,18 @@ router.get("/:uuid", validateUUID, async (req, res) => {
 
   const query = `
     SELECT 
-      id, originUrl, description, programme, transmissiondate, 
-      transmissiontime, title, timestamp, sourceurl
+      id,
+      originUrl,
+      description,
+      programme,
+      transmissiondate,
+      transmissiontime,
+      title,
+      timestamp,
+      sourceurl
     FROM intercepted_data 
-    WHERE id = ? LIMIT 1;
+    WHERE id = ? 
+    LIMIT 1;
   `;
 
   try {
@@ -23,10 +31,10 @@ router.get("/:uuid", validateUUID, async (req, res) => {
     }
 
     const complaintData = results[0];
-    res.status(200).json({
+    const response = {
       complaint: {
         id: complaintData.id,
-        originUrl: "[REDACTED]",
+        originUrl: complaintData.originUrl ? "[REDACTED]" : null,
         description: complaintData.description || null,
         programme: complaintData.programme || null,
         transmissiondate: complaintData.transmissiondate || null,
@@ -35,11 +43,15 @@ router.get("/:uuid", validateUUID, async (req, res) => {
         timestamp: complaintData.timestamp || null,
         sourceurl: complaintData.sourceurl || null,
       },
-    });
+    };
+
+    console.log(`Complaint data accessed for ID: ${uuid}`);
+    res.status(200).json(response);
   } catch (err) {
     console.error("Database fetch error:", err.message);
     res.status(500).json({ error: "Failed to fetch complaint data." });
   }
 });
+
 
 module.exports = router;
