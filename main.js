@@ -8,7 +8,7 @@ const complaintRoutes = require("./routes/complaints");
 const replyRoutes = require("./routes/replies");
 const interceptRoutes = require("./routes/intercepts");
 const problematicRoutes = require("./routes/problematic_articles");
-const json_copy = require(".routes/json_copy");
+const json_copy = require("./routes/json_copy");
 
 const app = express();
 const PORT = process.env.SERVER_PORT || process.env.PORT || 5555;

@@ -1,5 +1,7 @@
 const express = require('express');
+const { isUserLoggedIn } = require('../middlewares/login_wordpress');
 const router = express.Router();
+
 
 // Route to get data (only if user is logged in)
 router.get('/data', isUserLoggedIn, async (req, res) => {
@@ -11,8 +13,8 @@ router.get('/data', isUserLoggedIn, async (req, res) => {
     }
 });
 
-// Route to set data (only if user is logged in)
-router.post('/data', isUserLoggedIn, async (req, res) => {
+// Route to set data
+router.post('/data', async (req, res) => {
     try {
         const { key, value } = req.body;
         // Simulate saving data
