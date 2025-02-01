@@ -4,7 +4,7 @@ const router = express.Router();
 
 
 // Route to get data (only if user is logged in)
-router.get('/data', isUserLoggedIn, async (req, res) => {
+router.get('/data', async (req, res) => {
     try {
         // Simulate fetching data
         res.json({ message: 'Here is your data', data: { key: 'value' } });
