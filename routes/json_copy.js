@@ -1,35 +1,34 @@
 const express = require('express');
-const fs = require('fs').promises;
+const fs = require('fs');
 const path = require('path');
-const { isUserLoggedIn } = require('../middlewares/login_wordpress');
 const router = express.Router();
 
-const DATA_FILE = path.join(__dirname, '../data.json');
+const DATA_DIR = path.join(__dirname, 'data');
+if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR);
 
-// Function to read data from file
-const readData = async () => {
-    try {
-        const data = await fs.readFile(DATA_FILE, 'utf8');
-        return JSON.parse(data);
-    } catch (error) {
-        return {}; // Return empty object if file does not exist or is empty
-    }
+// Helper function to read data from file
+const readData = (name) => {
+    const filePath = path.join(DATA_DIR, name);
+    if (!fs.existsSync(filePath)) return null;
+    return fs.readFileSync(filePath, 'utf8');
 };
 
-// Function to write data to file
-const writeData = async (data) => {
-    try {
-        await fs.writeFile(DATA_FILE, JSON.stringify(data, null, 2), 'utf8');
-    } catch (error) {
-        throw new Error('Failed to write data to file');
-    }
+// Helper function to write data to file
+const writeData = (name, value) => {
+    const filePath = path.join(DATA_DIR, name);
+    fs.writeFileSync(filePath, value);
 };
 
-// Route to get data
-router.get('/data', async (req, res) => {
+// Route to get data by filename
+router.get('/data/:name', async (req, res) => {
     try {
-        const data = await readData();
-        res.json({ message: 'Here is your data', data });
+        const { name } = req.params;
+        const data = readData(name);
+        if (data !== null) {
+            res.status(200).json({ message: 'Data found', data });
+        } else {
+            res.status(404).json({ error: 'Data not found' });
+        }
     } catch (error) {
         res.status(500).json({ error: 'Failed to retrieve data' });
     }
@@ -38,16 +37,14 @@ router.get('/data', async (req, res) => {
 // Route to set data
 router.post('/data', async (req, res) => {
     try {
-        const { key, value } = req.body;
-        if (!key || !value) {
-            return res.status(400).json({ error: 'Both key and value are required' });
+        const { name, value } = req.body;
+        if (!name || !value) {
+            return res.status(400).json({ error: 'Missing name or value' });
         }
         
-        let data = await readData();
-        data[key] = value; // Update data object
-        await writeData(data);
+        writeData(name, value);
         
-        res.json({ message: 'Data saved successfully', data });
+        res.status(200).json({ message: 'Data saved successfully', data: { name, value } });
     } catch (error) {
         res.status(500).json({ error: 'Failed to save data' });
     }
