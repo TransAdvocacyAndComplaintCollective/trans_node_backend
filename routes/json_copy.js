@@ -27,11 +27,15 @@ const readData = async (name) => {
     }
 };
 
-// Helper function to write data to file
+// Helper function to write data to file (Fix: Ensure value is a string)
 const writeData = async (name, value) => {
     name = sanitizeFilename(name);
     const filePath = path.join(DATA_DIR, name);
-    await fs.writeFile(filePath, value);
+
+    // Convert value to a string if it's an object
+    const stringValue = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
+
+    await fs.writeFile(filePath, stringValue, 'utf8');
 };
 
 // Route to get data by filename
@@ -41,7 +45,7 @@ router.get('/data/:name', async (req, res) => {
         const sanitized = sanitizeFilename(name);
         const data = await readData(sanitized);
         if (data !== null) {
-            res.status(200).json({ message: 'Data found', data });
+            res.status(200).json({ message: 'Data found', data: JSON.parse(data) });
         } else {
             res.status(404).json({ error: 'Data not found' });
         }
@@ -58,9 +62,9 @@ router.post('/data', async (req, res) => {
             return res.status(400).json({ error: 'Missing name or value' });
         }
         const sanitized = sanitizeFilename(name);
-        
+
         await writeData(sanitized, value);
-        
+
         res.status(200).json({ message: 'Data saved successfully', data: { name: sanitized, value } });
     } catch (error) {
         res.status(500).json({ error: 'Failed to save data', details: error.message });
