@@ -1,36 +1,52 @@
 const express = require('express');
-const fs = require('fs');
+const fs = require('fs').promises;
 const path = require('path');
 const router = express.Router();
 
 const DATA_DIR = path.join(__dirname, 'data');
-if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR);
+fs.mkdir(DATA_DIR, { recursive: true }).catch(console.error);
+
+// Helper function to sanitize filename
+const sanitizeFilename = (name) => {
+    if (!/^[a-zA-Z0-9._-]+$/.test(name)) {
+        throw new Error('Invalid filename');
+    }
+    return name;
+};
 
 // Helper function to read data from file
-const readData = (name) => {
+const readData = async (name) => {
+    name = sanitizeFilename(name);
     const filePath = path.join(DATA_DIR, name);
-    if (!fs.existsSync(filePath)) return null;
-    return fs.readFileSync(filePath, 'utf8');
+    try {
+        await fs.access(filePath);
+        return await fs.readFile(filePath, 'utf8');
+    } catch (error) {
+        console.error(`Error reading file ${filePath}:`, error);
+        return null;
+    }
 };
 
 // Helper function to write data to file
-const writeData = (name, value) => {
+const writeData = async (name, value) => {
+    name = sanitizeFilename(name);
     const filePath = path.join(DATA_DIR, name);
-    fs.writeFileSync(filePath, value);
+    await fs.writeFile(filePath, value);
 };
 
 // Route to get data by filename
 router.get('/data/:name', async (req, res) => {
     try {
         const { name } = req.params;
-        const data = readData(name);
+        const sanitized = sanitizeFilename(name);
+        const data = await readData(sanitized);
         if (data !== null) {
             res.status(200).json({ message: 'Data found', data });
         } else {
             res.status(404).json({ error: 'Data not found' });
         }
     } catch (error) {
-        res.status(500).json({ error: 'Failed to retrieve data' });
+        res.status(500).json({ error: 'Failed to retrieve data', details: error.message });
     }
 });
 
@@ -41,12 +57,13 @@ router.post('/data', async (req, res) => {
         if (!name || !value) {
             return res.status(400).json({ error: 'Missing name or value' });
         }
+        const sanitized = sanitizeFilename(name);
         
-        writeData(name, value);
+        await writeData(sanitized, value);
         
-        res.status(200).json({ message: 'Data saved successfully', data: { name, value } });
+        res.status(200).json({ message: 'Data saved successfully', data: { name: sanitized, value } });
     } catch (error) {
-        res.status(500).json({ error: 'Failed to save data' });
+        res.status(500).json({ error: 'Failed to save data', details: error.message });
     }
 });
 
