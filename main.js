@@ -22,7 +22,7 @@ app.use("/api/complaint", complaintRoutes);
 app.use("/api/replies", replyRoutes);
 app.use("/api/intercept", interceptRoutes);
 app.use("/api/problematic", problematicRoutes);
-app.use("/api/replay", json_copy);
+app.use("/api/json_copy", json_copy);
 
 app.get("/api", (req, res) => {
   res.json({ message: "Custom API response" });
