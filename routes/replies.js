@@ -24,7 +24,7 @@ router.get("/:uuid", validateUUID, (req, res) => {
 
 
 // POST request to store replies
-router.post("/api/replies", (req, res) => {
+router.post("/", (req, res) => {
   const { bbc_ref_number, intercept_id, bbc_reply } = req.body;
 
   // Basic validation for required fields
