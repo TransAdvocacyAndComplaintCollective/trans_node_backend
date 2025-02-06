@@ -1,6 +1,7 @@
 const express = require("express");
 const db = require("../config/db");
 const { validateUUID } = require("../middlewares/validateUUID");
+const sanitizeHtml = require('sanitize-html');
 
 const router = express.Router();
 
