@@ -30,70 +30,97 @@ db.getConnection((err, connection) => {
   }
   console.log("Connected to MySQL database.");
   connection.release();
+
+  // After connection, ensure the intercepted_data table has the correct schema.
+  // Create the table if it does not exist.
+  createInterceptedDataTable();
 });
-
-// Helper function to generate a UUID
-function generateId() {
-  const uuid = crypto.randomUUID();
-  console.log("Generated UUID:", uuid);
-  if (!uuid) {
-    throw new Error("UUID generation failed");
-  }
-  return uuid;
-}
-
-// Create or update tables
 
 // Create intercepted_data table (legacy table updated)
-const createComplaintsTable = `
-CREATE TABLE IF NOT EXISTS intercepted_data (
-  id VARCHAR(36) PRIMARY KEY,
-  source ENUM('BBC', 'IPSO') NOT NULL DEFAULT 'BBC',
-  originUrl VARCHAR(255),
-  title VARCHAR(255),
-  description TEXT,
-  emailaddress VARCHAR(255),
-  firstname VARCHAR(255),
-  lastname VARCHAR(255),
-  salutation VARCHAR(255),
-  generalissue1 TEXT,
-  intro_text TEXT,
-  iswelsh VARCHAR(10),
-  liveorondemand VARCHAR(50),
-  localradio VARCHAR(255),
-  make VARCHAR(255),
-  moderation_text TEXT,
-  network VARCHAR(255),
-  outside_the_uk VARCHAR(10),
-  platform VARCHAR(255),
-  programme VARCHAR(255),
-  programmeid VARCHAR(255),
-  reception_text TEXT,
-  redbuttonfault VARCHAR(255),
-  region VARCHAR(255),
-  responserequired VARCHAR(255),
-  servicetv VARCHAR(255),
-  sounds_text TEXT,
-  sourceurl VARCHAR(255),
-  subject VARCHAR(255),
-  transmissiondate VARCHAR(50),
-  transmissiontime VARCHAR(50),
-  under18 VARCHAR(10),
-  verifyform VARCHAR(255),
-  complaint_nature VARCHAR(255),
-  complaint_nature_sounds VARCHAR(255),
-  ipso_terms BOOLEAN,
-  timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-) ENGINE=InnoDB;
-`;
+function createInterceptedDataTable() {
+  const createComplaintsTable = `
+  CREATE TABLE IF NOT EXISTS intercepted_data (
+    id VARCHAR(36) PRIMARY KEY,
+    source ENUM('BBC', 'IPSO') NOT NULL DEFAULT 'BBC',
+    originUrl VARCHAR(255),
+    title VARCHAR(255),
+    description TEXT,
+    emailaddress VARCHAR(255),
+    firstname VARCHAR(255),
+    lastname VARCHAR(255),
+    salutation VARCHAR(255),
+    generalissue1 TEXT,
+    intro_text TEXT,
+    iswelsh VARCHAR(10),
+    liveorondemand VARCHAR(50),
+    localradio VARCHAR(255),
+    make VARCHAR(255),
+    moderation_text TEXT,
+    network VARCHAR(255),
+    outside_the_uk VARCHAR(10),
+    platform VARCHAR(255),
+    programme VARCHAR(255),
+    programmeid VARCHAR(255),
+    reception_text TEXT,
+    redbuttonfault VARCHAR(255),
+    region VARCHAR(255),
+    responserequired VARCHAR(255),
+    servicetv VARCHAR(255),
+    sounds_text TEXT,
+    sourceurl VARCHAR(255),
+    subject VARCHAR(255),
+    transmissiondate VARCHAR(50),
+    transmissiontime VARCHAR(50),
+    under18 VARCHAR(10),
+    verifyform VARCHAR(255),
+    complaint_nature VARCHAR(255),
+    complaint_nature_sounds VARCHAR(255),
+    ipso_terms BOOLEAN,
+    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  ) ENGINE=InnoDB;
+  `;
 
-db.query(createComplaintsTable, (err) => {
-  if (err) {
-    console.error("Error creating intercepted_data table:", err.message);
-  } else {
-    console.log("Table 'intercepted_data' created or already exists.");
-  }
-});
+  db.query(createComplaintsTable, (err) => {
+    if (err) {
+      console.error("Error creating intercepted_data table:", err.message);
+    } else {
+      console.log("Table 'intercepted_data' created or already exists.");
+      // Check if the 'source' column exists; if not, add it.
+      addColumnIfNotExists("source", "ENUM('BBC', 'IPSO') NOT NULL DEFAULT 'BBC'", "id");
+    }
+  });
+}
+
+// Helper function to add a column if it doesn't exist
+function addColumnIfNotExists(columnName, columnDefinition, afterColumn) {
+  const dbName = process.env.DB_NAME || "intercepted_data_db";
+  const checkQuery = `
+    SELECT COUNT(*) AS count 
+    FROM information_schema.COLUMNS 
+    WHERE TABLE_SCHEMA = ? 
+      AND TABLE_NAME = 'intercepted_data' 
+      AND COLUMN_NAME = ?;
+  `;
+  db.query(checkQuery, [dbName, columnName], (err, results) => {
+    if (err) {
+      console.error(`Error checking column ${columnName}:`, err.message);
+      return;
+    }
+    if (results[0].count === 0) {
+      // Add the column after a specified column (for example, after "id")
+      const alterQuery = `ALTER TABLE intercepted_data ADD COLUMN ${columnName} ${columnDefinition} AFTER ${afterColumn};`;
+      db.query(alterQuery, (err2) => {
+        if (err2) {
+          console.error(`Error adding column ${columnName}:`, err2.message);
+        } else {
+          console.log(`Added column ${columnName} to intercepted_data.`);
+        }
+      });
+    } else {
+      console.log(`Column ${columnName} already exists in intercepted_data.`);
+    }
+  });
+}
 
 // Function to drop a column if it exists
 function dropColumnIfExists(columnName, callback) {
@@ -465,6 +492,16 @@ function handleIntercept(req, res) {
     console.log("Data successfully inserted with ID:", id);
     res.status(200).json({ message: "Data stored successfully.", id });
   });
+}
+
+// Helper function to generate a UUID
+function generateId() {
+  const uuid = crypto.randomUUID();
+  console.log("Generated UUID:", uuid);
+  if (!uuid) {
+    throw new Error("UUID generation failed");
+  }
+  return uuid;
 }
 
 // POST endpoint for legacy compatibility

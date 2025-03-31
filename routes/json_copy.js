@@ -3,11 +3,13 @@ const fs = require('fs').promises;
 const path = require('path');
 const multer = require('multer');
 const xss = require('xss');
-
 const router = express.Router();
 const upload = multer(); // Set up multer for handling file uploads
+// check env variable to bypass captcha (it will be like a password)
+const bypassCaptchaPassword = process.env.bypassCaptcha_password;
+// It is assumed that cookie-parser middleware is in use in the main app.
+// For example: app.use(require('cookie-parser')());
 
-// Define the data directory and ensure it exists
 const DATA_DIR = path.join(__dirname, 'data');
 fs.mkdir(DATA_DIR, { recursive: true }).catch(console.error);
 
@@ -66,50 +68,71 @@ const sanitizeValue = (value) => {
   return value;
 };
 
-// Route to get data by filename
-router.get('/data/:name', async (req, res) => {
+// Middleware to check for suspicious activity using cookies
+function checkSusCookie(req, res, next) {
+  if (req.cookies && req.cookies.sus === 'true') {
+    return res.status(403).json({ error: 'Access blocked due to suspicious activity.' });
+  }
+  next();
+}
+
+// GET route to get data by filename, with CAPTCHA validation
+router.get('/data/:name', checkSusCookie, async (req, res) => {
   try {
+    // CAPTCHA validation:
+    // Expect a query parameter "captcha" that should be a number.
+    // In our simple scheme, an even number indicates a successful human check.
+    const bypassCaptcha = req.query.bypassCaptchaPassword ===  bypassCaptchaPassword;
+    const captcha = req.query.captcha;
+    if (!captcha) {
+      // No CAPTCHA provided – mark as suspicious.
+      res.cookie('sus', 'true', { maxAge: 24 * 60 * 60 * 1000, httpOnly: true });
+      return res.status(400).json({ error: 'Missing CAPTCHA token.' });
+    }
+    const captchaNum = parseInt(captcha, 10);
+    if (isNaN(captchaNum) || (captchaNum % 2 !== 0)) {
+      // Odd number or invalid: mark as suspicious.
+      res.cookie('sus', 'true', { maxAge: 24 * 60 * 60 * 1000, httpOnly: true });
+      return res.status(400).json({ error: 'Invalid CAPTCHA token.' });
+    }
+    // If we reached here, CAPTCHA validation passed.
     const { name } = req.params;
     const sanitizedFilename = sanitizeFilename(name);
     const data = await readData(sanitizedFilename);
     if (data !== null) {
       try {
-        // Try to parse the data as JSON
+        // Try to parse the data as JSON.
         const parsedData = JSON.parse(data);
-        res.status(200).json({ message: 'Data found', data: parsedData });
+        return res.status(200).json({ message: 'Data found', data: parsedData });
       } catch (parseError) {
-        // If parsing fails, return the raw string
-        res.status(200).json({ message: 'Data found', data });
+        // If parsing fails, return the raw string.
+        return res.status(200).json({ message: 'Data found', data });
       }
     } else {
-      res.status(404).json({ error: 'Data not found' });
+      return res.status(404).json({ error: 'Data not found' });
     }
   } catch (error) {
-    res.status(500).json({ error: 'Failed to retrieve data', details: error.message });
+    return res.status(500).json({ error: 'Failed to retrieve data', details: error.message });
   }
 });
 
-// Route to set data with support for file uploads
-// Added express.json() to properly handle JSON payloads from Google Sheets.
+// POST route to set data with support for file uploads (no CAPTCHA validation)
 router.post('/data', express.json(), upload.single(FILE_UPLOAD_KEY), async (req, res) => {
   try {
-    // Validate the API key
+    // Validate the API key.
     if (req.body.apiKey !== EXPECTED_API_KEY) {
       return res.status(401).json({ error: 'Unauthorized: Invalid API key' });
     }
 
-    // Extract the "name" from the body
+    // Extract the "name" from the body.
     const { name } = req.body;
-
-    // If no name is provided, return an error.
     if (!name) {
       return res.status(400).json({ error: 'Missing name' });
     }
     const sanitizedFilename = sanitizeFilename(name);
 
     let value;
-    // If a file is uploaded with the key defined by FILE_UPLOAD_KEY,
-    // use its content as the value. Otherwise, use the "value" from the body.
+    // If a file is uploaded with the key defined by FILE_UPLOAD_KEY, use its content as the value.
     if (req.file) {
       // Assuming the file is text-based, convert its buffer to a UTF-8 string.
       value = req.file.buffer.toString('utf8');
@@ -129,9 +152,9 @@ router.post('/data', express.json(), upload.single(FILE_UPLOAD_KEY), async (req,
     });
   } catch (error) {
     console.error('Error in POST /data:', error);
-    // Do not expose internal error details to the client
     res.status(500).json({ error: 'Failed to save data' });
   }
 });
 
 module.exports = router;
+ 
