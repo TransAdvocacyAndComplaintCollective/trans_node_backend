@@ -3,10 +3,11 @@ const fs = require('fs').promises;
 const path = require('path');
 const multer = require('multer');
 const xss = require('xss');
+const {RecaptchaEnterpriseServiceClient} =require('@google-cloud/recaptcha-enterprise').v2;
+const recaptchaenterpriseClient = new RecaptchaEnterpriseServiceClient();
 const router = express.Router();
 const upload = multer(); // Set up multer for handling file uploads
 // check env variable to bypass captcha (it will be like a password)
-const bypassCaptchaPassword = process.env.bypassCaptcha_password;
 // It is assumed that cookie-parser middleware is in use in the main app.
 // For example: app.use(require('cookie-parser')());
 
@@ -17,6 +18,10 @@ fs.mkdir(DATA_DIR, { recursive: true }).catch(console.error);
 const FILE_UPLOAD_KEY = process.env.FILE_UPLOAD_KEY || 'file';
 // Set up the expected API key (for example, from an environment variable)
 const EXPECTED_API_KEY = process.env.API_KEY || 'mySecretApiKey';
+// Set up the expected API key for the CAPTCHA bypass (for example, from an environment variable)
+const bypassCaptchaPassword = process.env.bypassCaptcha_password;
+// Set up the expected API key for the Google reCAPTCHA (for example, from an environment variable)
+const EXPECTED_RECAPTCHA_KEY = process.env.RECAPTCHA_KEY || 'myRecaptchaKey';
 
 // Helper function to sanitize filename
 const sanitizeFilename = (name) => {
@@ -82,19 +87,42 @@ router.get('/data/:name', checkSusCookie, async (req, res) => {
     // CAPTCHA validation:
     // Expect a query parameter "captcha" that should be a number.
     // In our simple scheme, an even number indicates a successful human check.
-    const bypassCaptcha = req.query.bypassCaptchaPassword ===  bypassCaptchaPassword;
+    const bypass = req.query.bypassPassword ===  bypassPassword;
     const captcha = req.query.captcha;
-    if (!captcha) {
+    const value = req.query.value;
+    if (!captcha && (!bypass)) {
       // No CAPTCHA provided – mark as suspicious.
       res.cookie('sus', 'true', { maxAge: 24 * 60 * 60 * 1000, httpOnly: true });
       return res.status(400).json({ error: 'Missing CAPTCHA token.' });
     }
     const captchaNum = parseInt(captcha, 10);
-    if (isNaN(captchaNum) || (captchaNum % 2 !== 0)) {
+    if ((isNaN(value) || (value % 2 !== 0)&& !bypass)) {
       // Odd number or invalid: mark as suspicious.
       res.cookie('sus', 'true', { maxAge: 24 * 60 * 60 * 1000, httpOnly: true });
       return res.status(400).json({ error: 'Invalid CAPTCHA token.' });
     }
+    if (captcha){
+      // check if the captcha is valid
+      const projectId = process.env.GOOGLE_CLOUD_PROJECT_ID;
+      const recaptchaKey = process.env.RECAPTCHA_KEY;
+      const recaptchaResponse = await recaptchaenterpriseClient.assessRecaptcha({
+        project: projectId,
+        assessment: {
+          event: {
+            token: captcha,
+            siteKey: recaptchaKey,
+          },
+        },
+      });
+      if (recaptchaResponse[0].tokenProperties.valid) {
+        // CAPTCHA validation passed.
+      } else {
+        // CAPTCHA validation failed.
+        res.cookie('sus', 'true', { maxAge: 24 * 60 * 60 * 1000, httpOnly: true });
+        return res.status(400).json({ error: 'Invalid CAPTCHA token.' });
+      }
+    }
+
     // If we reached here, CAPTCHA validation passed.
     const { name } = req.params;
     const sanitizedFilename = sanitizeFilename(name);
