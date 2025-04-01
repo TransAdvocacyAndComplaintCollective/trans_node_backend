@@ -3,11 +3,11 @@ const fs = require('fs').promises;
 const path = require('path');
 const multer = require('multer');
 const xss = require('xss');
-const {RecaptchaEnterpriseServiceClient} =require('@google-cloud/recaptcha-enterprise').v2;
+const { RecaptchaEnterpriseServiceClient } = require('@google-cloud/recaptcha-enterprise').v2;
 const recaptchaenterpriseClient = new RecaptchaEnterpriseServiceClient();
 const router = express.Router();
 const upload = multer(); // Set up multer for handling file uploads
-// check env variable to bypass captcha (it will be like a password)
+
 // It is assumed that cookie-parser middleware is in use in the main app.
 // For example: app.use(require('cookie-parser')());
 
@@ -18,10 +18,12 @@ fs.mkdir(DATA_DIR, { recursive: true }).catch(console.error);
 const FILE_UPLOAD_KEY = process.env.FILE_UPLOAD_KEY || 'file';
 // Set up the expected API key (for example, from an environment variable)
 const EXPECTED_API_KEY = process.env.API_KEY || 'mySecretApiKey';
-// Set up the expected API key for the CAPTCHA bypass (for example, from an environment variable)
-const bypassCaptchaPassword = process.env.bypassCaptcha_password;
-// Set up the expected API key for the Google reCAPTCHA (for example, from an environment variable)
+// Expected bypass password (from environment) to skip CAPTCHA validation
+const expectedBypassPassword = process.env.bypassCaptcha_password;
+// Expected reCAPTCHA key (site key)
 const EXPECTED_RECAPTCHA_KEY = process.env.RECAPTCHA_KEY || 'myRecaptchaKey';
+// Your Google Cloud project ID (replace with your actual project ID)
+const PROJECT_ID = process.env.GOOGLE_CLOUD_PROJECT || 'my-project';
 
 // Helper function to sanitize filename
 const sanitizeFilename = (name) => {
@@ -48,10 +50,7 @@ const readData = async (name) => {
 const writeData = async (name, value) => {
   const fileName = sanitizeFilename(name);
   const filePath = path.join(DATA_DIR, fileName);
-
-  // Convert value to a string if it's not already a string
   const stringValue = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
-
   await fs.writeFile(filePath, stringValue, 'utf8');
 };
 
@@ -62,11 +61,7 @@ const sanitizeValue = (value) => {
   } else if (typeof value === 'object' && value !== null) {
     const sanitizedObj = {};
     for (const key in value) {
-      if (typeof value[key] === 'string') {
-        sanitizedObj[key] = xss(value[key]);
-      } else {
-        sanitizedObj[key] = value[key];
-      }
+      sanitizedObj[key] = typeof value[key] === 'string' ? xss(value[key]) : value[key];
     }
     return sanitizedObj;
   }
@@ -83,57 +78,66 @@ function checkSusCookie(req, res, next) {
 
 // GET route to get data by filename, with CAPTCHA validation
 router.get('/data/:name', checkSusCookie, async (req, res) => {
-  try {
-    // CAPTCHA validation:
-    // Expect a query parameter "captcha" that should be a number.
-    // In our simple scheme, an even number indicates a successful human check.
-    const bypass = req.query.bypassPassword ===  bypassPassword;
-    const captcha = req.query.captcha;
-    const value = req.query.value;
-    if (!captcha && (!bypass)) {
-      // No CAPTCHA provided – mark as suspicious.
-      res.cookie('sus', 'true', { maxAge: 24 * 60 * 60 * 1000, httpOnly: true });
-      return res.status(400).json({ error: 'Missing CAPTCHA token.' });
-    }
-    const captchaNum = parseInt(captcha, 10);
-    if ((isNaN(value) || (value % 2 !== 0)&& !bypass)) {
-      // Odd number or invalid: mark as suspicious.
-      res.cookie('sus', 'true', { maxAge: 24 * 60 * 60 * 1000, httpOnly: true });
-      return res.status(400).json({ error: 'Invalid CAPTCHA token.' });
-    }
-    if (captcha){
-      // check if the captcha is valid
-      const projectId = process.env.GOOGLE_CLOUD_PROJECT_ID;
-      const recaptchaKey = process.env.RECAPTCHA_KEY;
-      const recaptchaResponse = await recaptchaenterpriseClient.assessRecaptcha({
-        project: projectId,
-        assessment: {
-          event: {
-            token: captcha,
-            siteKey: recaptchaKey,
-          },
-        },
-      });
-      if (recaptchaResponse[0].tokenProperties.valid) {
-        // CAPTCHA validation passed.
-      } else {
-        // CAPTCHA validation failed.
-        res.cookie('sus', 'true', { maxAge: 24 * 60 * 60 * 1000, httpOnly: true });
-        return res.status(400).json({ error: 'Invalid CAPTCHA token.' });
-      }
-    }
+  // Extract fields from the request body (note: GET requests typically don’t have bodies)
+  const providedBypass = req.body.bypassCaptcha_password;
+  // Prefer recaptchaToken if provided, otherwise fallback to g_recaptcha_response
+  const tokenToValidate = req.body.recaptchaToken || req.body.g_recaptcha_response;
+  // Example bot detection logic (ensure req.body.value is a number before using modulus)
+  const value = Number(req.body.value);
+  const is_bot = !isNaN(value) && value % 2 === 0;
 
-    // If we reached here, CAPTCHA validation passed.
+  // If the provided bypass password does not match the expected value, perform CAPTCHA validation
+  if (providedBypass !== expectedBypassPassword) {
+    if (is_bot) {
+      res.cookie('sus', 'true', { maxAge: 900000, httpOnly: true });
+      return res.status(403).json({ error: 'Access blocked due to suspicious activity.' });
+    }
+    // Ensure a CAPTCHA token was provided
+    if (!tokenToValidate) {
+      return res.status(400).json({ error: 'CAPTCHA token is required' });
+    }
+    // Build the reCAPTCHA Enterprise assessment request using the tokenToValidate
+    const request = {
+      parent: `projects/${PROJECT_ID}`,
+      assessment: {
+        event: {
+          token: tokenToValidate,
+          siteKey: EXPECTED_RECAPTCHA_KEY,
+        },
+      },
+    };
+    try {
+      const [response] = await recaptchaenterpriseClient.createAssessment(request);
+      const { valid, action, score } = response.tokenProperties;
+      const expectedAction = 'submit'; // Replace with your expected action if needed
+      if (!valid) {
+        return res.status(400).json({ error: 'Invalid CAPTCHA response' });
+      }
+      if (action !== expectedAction) {
+        return res.status(400).json({ error: 'CAPTCHA action mismatch' });
+      }
+      if (score < 0.5) {
+        res.cookie('sus', 'true', { maxAge: 900000, httpOnly: true });
+        return res.status(403).json({ error: 'Access blocked due to suspicious activity.' });
+      }
+      console.log('CAPTCHA token validated:', tokenToValidate);
+      console.log('CAPTCHA action:', action);
+      console.log('CAPTCHA score:', score);
+    } catch (captchaError) {
+      console.error('Error during CAPTCHA validation:', captchaError);
+      return res.status(500).json({ error: 'CAPTCHA validation failed' });
+    }
+  }
+
+  try {
     const { name } = req.params;
     const sanitizedFilename = sanitizeFilename(name);
     const data = await readData(sanitizedFilename);
     if (data !== null) {
       try {
-        // Try to parse the data as JSON.
         const parsedData = JSON.parse(data);
         return res.status(200).json({ message: 'Data found', data: parsedData });
       } catch (parseError) {
-        // If parsing fails, return the raw string.
         return res.status(200).json({ message: 'Data found', data });
       }
     } else {
@@ -147,33 +151,24 @@ router.get('/data/:name', checkSusCookie, async (req, res) => {
 // POST route to set data with support for file uploads (no CAPTCHA validation)
 router.post('/data', express.json(), upload.single(FILE_UPLOAD_KEY), async (req, res) => {
   try {
-    // Validate the API key.
     if (req.body.apiKey !== EXPECTED_API_KEY) {
       return res.status(401).json({ error: 'Unauthorized: Invalid API key' });
     }
-
-    // Extract the "name" from the body.
     const { name } = req.body;
     if (!name) {
       return res.status(400).json({ error: 'Missing name' });
     }
     const sanitizedFilename = sanitizeFilename(name);
-
     let value;
-    // If a file is uploaded with the key defined by FILE_UPLOAD_KEY, use its content as the value.
     if (req.file) {
-      // Assuming the file is text-based, convert its buffer to a UTF-8 string.
       value = req.file.buffer.toString('utf8');
     } else {
-      // If no file was provided, fall back to using req.body.value.
       if (req.body.value == null) {
         return res.status(400).json({ error: 'Missing value or file upload' });
       }
       value = sanitizeValue(req.body.value);
     }
-
     await writeData(sanitizedFilename, value);
-
     res.status(200).json({
       message: 'Data saved successfully',
       data: { name: sanitizedFilename, value },
@@ -185,4 +180,3 @@ router.post('/data', express.json(), upload.single(FILE_UPLOAD_KEY), async (req,
 });
 
 module.exports = router;
- 
