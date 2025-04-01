@@ -128,7 +128,7 @@ router.get('/data/:name', checkSusCookie, async (req, res) => {
       return res.status(500).json({ error: 'CAPTCHA validation failed' });
     }
   }
-
+  
   try {
     const { name } = req.params;
     const sanitizedFilename = sanitizeFilename(name);
