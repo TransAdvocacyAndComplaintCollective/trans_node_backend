@@ -87,6 +87,7 @@ function createInterceptedDataTable() {
       console.log("Table 'intercepted_data' created or already exists.");
       // Check if the 'source' column exists; if not, add it.
       addColumnIfNotExists("source", "ENUM('BBC', 'IPSO') NOT NULL DEFAULT 'BBC'", "id");
+      addColumnIfNotExists("ipso_terms", "BOOLEAN", "complaint_nature_sounds");
     }
   });
 }
