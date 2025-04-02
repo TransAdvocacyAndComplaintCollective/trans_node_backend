@@ -3,7 +3,7 @@ const fs = require('fs').promises;
 const path = require('path');
 const multer = require('multer');
 const xss = require('xss');
-const nodemailer = require('nodemailer');const mysql = require('mysql2');
+const nodemailer = require('nodemailer');
 const mysql = require("mysql2");
 const crypto = require('crypto');
 const { RecaptchaEnterpriseServiceClient } = require('@google-cloud/recaptcha-enterprise').v1;
