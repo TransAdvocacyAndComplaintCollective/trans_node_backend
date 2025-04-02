@@ -77,26 +77,18 @@ function checkSusCookie(req, res, next) {
 }
 
 // GET route to get data by filename, with CAPTCHA validation
-router.get('/data/:name', checkSusCookie, async (req, res) => {
-  // Extract fields from the request body (note: GET requests typically don’t have bodies)
+router.post('/data/:name', checkSusCookie, async (req, res) => {  // Changed from GET to POST
+  // Extract fields from the request body
   const providedBypass = req.body.bypassCaptcha_password;
   // Prefer recaptchaToken if provided, otherwise fallback to g_recaptcha_response
   const tokenToValidate = req.body.recaptchaToken || req.body.g_recaptcha_response;
-  // Example bot detection logic (ensure req.body.value is a number before using modulus)
-  const value = Number(req.body.value);
-  const is_bot = !isNaN(value) && value % 2 === 0;
 
-  // If the provided bypass password does not match the expected value, perform CAPTCHA validation
+  // If no bypass password is provided, validate the CAPTCHA token.
   if (providedBypass !== expectedBypassPassword) {
-    if (is_bot) {
-      res.cookie('sus', 'true', { maxAge: 900000, httpOnly: true });
-      return res.status(403).json({ error: 'Access blocked due to suspicious activity.' });
-    }
-    // Ensure a CAPTCHA token was provided
     if (!tokenToValidate) {
       return res.status(400).json({ error: 'CAPTCHA token is required' });
     }
-    // Build the reCAPTCHA Enterprise assessment request using the tokenToValidate
+    // Build the reCAPTCHA Enterprise assessment request
     const request = {
       parent: `projects/${PROJECT_ID}`,
       assessment: {
@@ -109,7 +101,7 @@ router.get('/data/:name', checkSusCookie, async (req, res) => {
     try {
       const [response] = await recaptchaenterpriseClient.createAssessment(request);
       const { valid, action, score } = response.tokenProperties;
-      const expectedAction = 'submit'; // Replace with your expected action if needed
+      const expectedAction = 'submit'; // Update if necessary
       if (!valid) {
         return res.status(400).json({ error: 'Invalid CAPTCHA response' });
       }
@@ -147,6 +139,7 @@ router.get('/data/:name', checkSusCookie, async (req, res) => {
     return res.status(500).json({ error: 'Failed to retrieve data', details: error.message });
   }
 });
+
 
 // POST route to set data with support for file uploads (no CAPTCHA validation)
 router.post('/data', express.json(), upload.single(FILE_UPLOAD_KEY), async (req, res) => {
