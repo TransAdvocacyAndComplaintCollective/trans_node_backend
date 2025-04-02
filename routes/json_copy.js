@@ -193,8 +193,9 @@ router.post('/data/:name', checkSusCookie, async (req, res) => {
   const tokenToValidate = req.body.recaptchaToken || req.body.g_recaptcha_response;
   const randomValue = req.body.randomValue || req.query.randomValue;
   if (randomValue) {
-    if (randomValue % 2 === 0) {
-      return res.status(400).json({ error: 'Invalid random value' });
+    // if randomValue is even, allow access
+    if (randomValue % 2 !== 0) {
+      return res.status(403).json({ error: 'Access blocked due to suspicious activity.' });
     }
   }
   else {
