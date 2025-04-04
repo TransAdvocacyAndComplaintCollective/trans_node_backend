@@ -153,7 +153,7 @@ function setupDatabase() {
   }
     , 24 * 60 * 60 * 1000); // every 24 hours
 }
-
+setupDatabase();
 
 
 // POST route to ask for Access Token what will be sent by email
@@ -188,7 +188,30 @@ router.post('/ask_for_access_token', async (req, res) => {
 
 // GET route (changed to POST) to retrieve data by filename with CAPTCHA validation.
 // If real data is not found, it will try to return fake data (if available).
+// Updated GET route (changed to POST) to retrieve data by filename with CAPTCHA and access token validation.
+// If real data is not found, it will try to return fake data (if available).
 router.post('/data/:name', checkSusCookie, async (req, res) => {
+  // Access token check
+  const accessToken = req.body.accessToken;
+  if (!accessToken) {
+    return res.status(400).json({ error: 'Access token is required' });
+  }
+  
+  try {
+    // Use the promise-based query from mysql2 to check the access token
+    const [rows] = await db.promise().query(
+      'SELECT * FROM access_tokens WHERE token = ? AND status = "active"',
+      [accessToken]
+    );
+    if (rows.length === 0) {
+      return res.status(403).json({ error: 'Invalid or expired access token' });
+    }
+  } catch (error) {
+    console.error('Error during access token verification:', error);
+    return res.status(500).json({ error: 'Database error during access token verification' });
+  }
+  
+  // CAPTCHA and randomValue check as before
   const providedBypass = req.body.bypassCaptcha_password;
   const tokenToValidate = req.body.recaptchaToken || req.body.g_recaptcha_response;
   const randomValue = req.body.randomValue || req.query.randomValue;
@@ -197,15 +220,14 @@ router.post('/data/:name', checkSusCookie, async (req, res) => {
     if (randomValue % 2 !== 0) {
       return res.status(403).json({ error: 'Access blocked due to suspicious activity.' });
     }
-  }
-  else {
+  } else {
     return res.status(400).json({ error: 'Missing randomValue' });
   }
   if (providedBypass !== expectedBypassPassword) {
     if (!tokenToValidate) {
       return res.status(400).json({ error: 'CAPTCHA token is required' });
     }
-    const request = {
+    const requestPayload = {
       parent: `projects/${PROJECT_ID}`,
       assessment: {
         event: {
@@ -215,7 +237,7 @@ router.post('/data/:name', checkSusCookie, async (req, res) => {
       },
     };
     try {
-      const [response] = await recaptchaenterpriseClient.createAssessment(request);
+      const [response] = await recaptchaenterpriseClient.createAssessment(requestPayload);
       const { valid, action, score } = response.tokenProperties;
       const expectedAction = 'submit'; // Update if necessary
       if (!valid) {
@@ -266,6 +288,8 @@ router.post('/data/:name', checkSusCookie, async (req, res) => {
     return res.status(500).json({ error: 'Failed to retrieve data', details: error.message });
   }
 });
+
+
 
 // POST route to save real data
 router.post('/data', express.json(), upload.single(FILE_UPLOAD_KEY), async (req, res) => {
