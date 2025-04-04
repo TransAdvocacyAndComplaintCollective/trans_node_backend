@@ -5,10 +5,12 @@ const mysql = require("mysql2");
 const crypto = require("crypto");
 const sanitizeHtml = require("sanitize-html");
 const cors = require("cors");
+const multer = require("multer");
+const path = require("path");
 
 const router = express.Router();
 
-// Apply middlewares to the router
+// Apply middlewares
 router.use(cors());
 router.use(express.json());
 
@@ -22,7 +24,7 @@ const db = mysql.createPool({
   connectionLimit: 10,
 });
 
-// Test the database connection
+// Test the database connection and create required tables
 db.getConnection((err, connection) => {
   if (err) {
     console.error("Database connection error:", err.message);
@@ -31,14 +33,19 @@ db.getConnection((err, connection) => {
   console.log("Connected to MySQL database.");
   connection.release();
 
-  // After connection, ensure the intercepted_data table has the correct schema.
-  // Create the table if it does not exist.
+  // Create necessary tables
   createInterceptedDataTable();
+  createIPSOFieldsTable();
+  createIPSOBreachesTable();
+  createRepliesTable();
+  createProblematicTable();
+  createFileUploadsTable();
 });
 
-// Create intercepted_data table (legacy table updated)
+// ==================== TABLE CREATION FUNCTIONS ====================
+
 function createInterceptedDataTable() {
-  const createComplaintsTable = `
+  const createTableQuery = `
   CREATE TABLE IF NOT EXISTS intercepted_data (
     id VARCHAR(36) PRIMARY KEY,
     source ENUM('BBC', 'IPSO') NOT NULL DEFAULT 'BBC',
@@ -79,20 +86,18 @@ function createInterceptedDataTable() {
     timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
   ) ENGINE=InnoDB;
   `;
-
-  db.query(createComplaintsTable, (err) => {
+  db.query(createTableQuery, (err) => {
     if (err) {
       console.error("Error creating intercepted_data table:", err.message);
     } else {
       console.log("Table 'intercepted_data' created or already exists.");
-      // Check if the 'source' column exists; if not, add it.
+      // Ensure additional columns exist if necessary
       addColumnIfNotExists("source", "ENUM('BBC', 'IPSO') NOT NULL DEFAULT 'BBC'", "id");
       addColumnIfNotExists("ipso_terms", "BOOLEAN", "complaint_nature_sounds");
     }
   });
 }
 
-// Helper function to add a column if it doesn't exist
 function addColumnIfNotExists(columnName, columnDefinition, afterColumn) {
   const dbName = process.env.DB_NAME || "intercepted_data_db";
   const checkQuery = `
@@ -108,7 +113,6 @@ function addColumnIfNotExists(columnName, columnDefinition, afterColumn) {
       return;
     }
     if (results[0].count === 0) {
-      // Add the column after a specified column (for example, after "id")
       const alterQuery = `ALTER TABLE intercepted_data ADD COLUMN ${columnName} ${columnDefinition} AFTER ${afterColumn};`;
       db.query(alterQuery, (err2) => {
         if (err2) {
@@ -123,142 +127,132 @@ function addColumnIfNotExists(columnName, columnDefinition, afterColumn) {
   });
 }
 
-// Function to drop a column if it exists
-function dropColumnIfExists(columnName, callback) {
-  const dbName = process.env.DB_NAME || "intercepted_data_db";
-  const checkQuery = `
-    SELECT COUNT(*) AS count 
-    FROM information_schema.COLUMNS 
-    WHERE TABLE_SCHEMA = ? 
-      AND TABLE_NAME = 'intercepted_data' 
-      AND COLUMN_NAME = ?;
+function createIPSOFieldsTable() {
+  const query = `
+  CREATE TABLE IF NOT EXISTS ipso_complaint_fields (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    complaint_id VARCHAR(36),
+    field_order INT,
+    field_value TEXT,
+    FOREIGN KEY (complaint_id) REFERENCES intercepted_data(id) ON DELETE CASCADE
+  ) ENGINE=InnoDB;
   `;
-  db.query(checkQuery, [dbName, columnName], (err, results) => {
+  db.query(query, (err) => {
     if (err) {
-      console.error(`Error checking column ${columnName}:`, err.message);
-      return callback(err);
-    }
-    if (results[0].count > 0) {
-      const alterQuery = `ALTER TABLE intercepted_data DROP COLUMN ${columnName};`;
-      db.query(alterQuery, (err2) => {
-        if (err2) {
-          console.error(`Error dropping column ${columnName}:`, err2.message);
-          return callback(err2);
-        } else {
-          console.log(`Dropped column ${columnName} from intercepted_data.`);
-          callback(null);
-        }
-      });
+      console.error("Error creating ipso_complaint_fields table:", err.message);
     } else {
-      console.log(`Column ${columnName} does not exist in intercepted_data.`);
-      callback(null);
+      console.log("Table 'ipso_complaint_fields' created or already exists.");
     }
   });
 }
 
-// Drop redundant columns sequentially
-dropColumnIfExists("ipso_contact_email", (err) => {
-  if (!err) {
-    dropColumnIfExists("ipso_contact_first_name", (err) => {
-      if (!err) {
-        dropColumnIfExists("ipso_contact_last_name", (err) => {
-          if (err) {
-            console.error("Error dropping ipso_contact_last_name:", err.message);
-          }
-        });
-      } else {
-        console.error("Error dropping ipso_contact_first_name:", err.message);
-      }
-    });
-  } else {
-    console.error("Error dropping ipso_contact_email:", err.message);
-  }
-});
+function createIPSOBreachesTable() {
+  const query = `
+  CREATE TABLE IF NOT EXISTS ipso_code_breaches (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    complaint_id VARCHAR(36),
+    clause VARCHAR(255),
+    details TEXT,
+    FOREIGN KEY (complaint_id) REFERENCES intercepted_data(id) ON DELETE CASCADE
+  ) ENGINE=InnoDB;
+  `;
+  db.query(query, (err) => {
+    if (err) {
+      console.error("Error creating ipso_code_breaches table:", err.message);
+    } else {
+      console.log("Table 'ipso_code_breaches' created or already exists.");
+    }
+  });
+}
 
-// Table for IPSO complaint fields
-const createIPSOFieldsTable = `
-CREATE TABLE IF NOT EXISTS ipso_complaint_fields (
-  id INT AUTO_INCREMENT PRIMARY KEY,
-  complaint_id VARCHAR(36),
-  field_order INT,
-  field_value TEXT,
-  FOREIGN KEY (complaint_id) REFERENCES intercepted_data(id) ON DELETE CASCADE
-) ENGINE=InnoDB;
-`;
+function createRepliesTable() {
+  const query = `
+  CREATE TABLE IF NOT EXISTS replies (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    bbc_ref_number VARCHAR(255) NOT NULL,
+    intercept_id VARCHAR(36) NOT NULL,
+    bbc_reply TEXT,
+    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (intercept_id) REFERENCES intercepted_data(id) ON DELETE CASCADE
+  ) ENGINE=InnoDB;
+  `;
+  db.query(query, (err) => {
+    if (err) {
+      console.error("Error creating replies table:", err.message);
+    } else {
+      console.log("Table 'replies' created or already exists.");
+    }
+  });
+}
 
-db.query(createIPSOFieldsTable, (err) => {
-  if (err) {
-    console.error("Error creating ipso_complaint_fields table:", err.message);
-  } else {
-    console.log("Table 'ipso_complaint_fields' created or already exists.");
-  }
-});
+function createProblematicTable() {
+  const query = `
+  CREATE TABLE IF NOT EXISTS problematic_article (
+    URL VARCHAR(255) PRIMARY KEY,
+    title TEXT,
+    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  ) ENGINE=InnoDB;
+  `;
+  db.query(query, (err) => {
+    if (err) {
+      console.error("Error creating problematic_article table:", err.message);
+    } else {
+      console.log("Table 'problematic_article' created or already exists.");
+    }
+  });
+}
 
-// Table for IPSO code breaches
-const createIPSOBreachesTable = `
-CREATE TABLE IF NOT EXISTS ipso_code_breaches (
-  id INT AUTO_INCREMENT PRIMARY KEY,
-  complaint_id VARCHAR(36),
-  clause VARCHAR(255),
-  details TEXT,
-  FOREIGN KEY (complaint_id) REFERENCES intercepted_data(id) ON DELETE CASCADE
-) ENGINE=InnoDB;
-`;
+function createFileUploadsTable() {
+  const query = `
+  CREATE TABLE IF NOT EXISTS file_uploads (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    taccRecordId VARCHAR(36) NOT NULL,
+    fileTitle VARCHAR(255),
+    originalName VARCHAR(255),
+    filename VARCHAR(255),
+    filePath VARCHAR(255),
+    uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (taccRecordId) REFERENCES intercepted_data(id) ON DELETE CASCADE
+  ) ENGINE=InnoDB;
+  `;
+  db.query(query, (err) => {
+    if (err) {
+      console.error("Error creating file_uploads table:", err.message);
+    } else {
+      console.log("Table 'file_uploads' created or already exists.");
+    }
+  });
+}
 
-db.query(createIPSOBreachesTable, (err) => {
-  if (err) {
-    console.error("Error creating ipso_code_breaches table:", err.message);
-  } else {
-    console.log("Table 'ipso_code_breaches' created or already exists.");
-  }
-});
+// ==================== MIDDLEWARES & MULTER SETUP ====================
 
-// Replies table
-const createRepliesTable = `
-CREATE TABLE IF NOT EXISTS replies (
-  id INT AUTO_INCREMENT PRIMARY KEY,
-  bbc_ref_number VARCHAR(255) NOT NULL,
-  intercept_id VARCHAR(36) NOT NULL,
-  bbc_reply TEXT,
-  timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (intercept_id) REFERENCES intercepted_data(id) ON DELETE CASCADE
-) ENGINE=InnoDB;
-`;
-
-db.query(createRepliesTable, (err) => {
-  if (err) {
-    console.error("Error creating replies table:", err.message);
-  } else {
-    console.log("Table 'replies' created or already exists.");
-  }
-});
-
-// Problematic article table
-const createProblematicTable = `
-CREATE TABLE IF NOT EXISTS problematic_article (
-  URL VARCHAR(255) PRIMARY KEY,
-  title TEXT,
-  timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-) ENGINE=InnoDB;
-`;
-
-db.query(createProblematicTable, (err) => {
-  if (err) {
-    console.error("Error creating problematic_article table:", err.message);
-  } else {
-    console.log("Table 'problematic_article' created or already exists.");
-  }
-});
-
-// Middleware to validate UUID format for GET endpoints
+// Validate UUID format for endpoints using params
 function validateUUID(req, res, next) {
   const { uuid } = req.params;
-  const uuidV4Pattern = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[4][0-9a-fA-F]{3}-[89ABab][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$/;
+  const uuidV4Pattern = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89ABab][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$/;
   if (!uuidV4Pattern.test(uuid)) {
     return res.status(400).json({ error: "Invalid UUID format." });
   }
   next();
 }
+
+// Multer configuration for file uploads
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    cb(null, 'uploads/'); // Ensure this directory exists in your project
+  },
+  filename: function (req, file, cb) {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
+    cb(null, file.fieldname + '-' + uniqueSuffix + path.extname(file.originalname));
+  }
+});
+
+const upload = multer({
+  storage: storage,
+  limits: { fileSize: 5 * 1024 * 1024 } // 5MB per file
+});
+
+// ==================== ENDPOINTS ====================
 
 // GET /api/complaint/:uuid endpoint
 router.get("/complaint/:uuid", validateUUID, async (req, res) => {
@@ -342,7 +336,7 @@ router.get("/replies/:uuid", validateUUID, (req, res) => {
   });
 });
 
-// Serve static files for replay endpoint
+// Serve static files for the replay endpoint
 router.use("/replay", express.static("public"));
 
 /**
@@ -555,6 +549,62 @@ router.post("/replies", (req, res) => {
       res.status(200).json({ message: "Reply stored successfully.", id: insertResult.insertId });
     });
   });
+});
+
+// POST endpoint for file uploads with validations and database storage
+router.post('/upload-files', upload.array('fileUpload[]', 5), async (req, res) => {
+  try {
+    const { taccRecordId, fileTitle } = req.body;
+    const uuidV4Pattern = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89ABab][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$/;
+    
+    // Validate UUID format for taccRecordId
+    if (!taccRecordId || !uuidV4Pattern.test(taccRecordId)) {
+      return res.status(400).json({ error: "Invalid or missing TACC Record ID. Please provide a valid UUID v4." });
+    }
+    
+    const files = req.files;
+    if (!files || files.length === 0) {
+      return res.status(400).json({ error: "No files uploaded." });
+    }
+    
+    // Validate maximum number of files allowed (max 5 in this example)
+    const maxFilesAllowed = 5;
+    if (files.length > maxFilesAllowed) {
+      return res.status(400).json({ error: `Maximum ${maxFilesAllowed} files allowed.` });
+    }
+    
+    // Insert file details into the file_uploads table
+    const insertFileQuery = `
+      INSERT INTO file_uploads (taccRecordId, fileTitle, originalName, filename, filePath)
+      VALUES (?, ?, ?, ?, ?);
+    `;
+    
+    const fileInsertPromises = files.map(file => {
+      return db.promise().query(insertFileQuery, [
+        taccRecordId,
+        fileTitle || null,
+        file.originalname,
+        file.filename,
+        file.path
+      ]);
+    });
+    
+    await Promise.all(fileInsertPromises);
+    
+    res.status(200).json({
+      message: 'Files uploaded and stored successfully.',
+      taccRecordId,
+      fileTitle,
+      files: files.map(file => ({
+        originalName: file.originalname,
+        filename: file.filename,
+        path: file.path,
+      })),
+    });
+  } catch (error) {
+    console.error('Error uploading files:', error);
+    res.status(500).json({ error: 'Failed to upload files' });
+  }
 });
 
 module.exports = router;
