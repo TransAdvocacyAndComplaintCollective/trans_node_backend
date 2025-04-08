@@ -336,12 +336,29 @@ router.get("/replies/:uuid", validateUUID, (req, res) => {
   });
 });
 
-// Serve static files for the replay endpoint
-router.use("/replay", express.static("public"));
+// GET /api/files/:uuid endpoint for uploaded files
+router.get("/files/:uuid", validateUUID, (req, res) => {
+  const { uuid } = req.params;
+  const query = `
+    SELECT originalName AS fileName, filePath AS fileUrl
+    FROM file_uploads
+    WHERE taccRecordId = ?
+    ORDER BY uploaded_at DESC;
+  `;
+  db.query(query, [uuid], (err, results) => {
+    if (err) {
+      console.error("Error fetching files:", err.message);
+      return res.status(500).json({ error: "Failed to fetch uploaded files." });
+    }
+    res.status(200).json(results);
+  });
+});
 
-/**
- * Common handler for POST /intercept and /intercept/v2.
- */
+// Serve static files (ensure uploads/ is accessible)
+// In your main app file you might use:
+// app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+// POST endpoint for legacy compatibility and /intercept/v2
 function handleIntercept(req, res) {
   const { originUrl, interceptedData, privacyPolicyAccepted } = req.body;
 
