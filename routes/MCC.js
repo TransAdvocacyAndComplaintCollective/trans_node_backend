@@ -366,9 +366,10 @@ router.get("/files/:uuid/:id", validateUUID, async (req, res) => {
       return res.status(404).json({ error: "File not found." });
     }
     const { filePath, originalName } = rows[0];
-    return res.sendFile(path.resolve(filePath), {}, (err) => {
+    // Use res.download to ensure the file is downloaded with the correct filename and extension.
+    return res.download(path.resolve(filePath), originalName, (err) => {
       if (err) {
-        console.error("Error sending file:", err);
+        console.error("Error downloading file:", err);
         res.status(500).end();
       }
     });
@@ -377,6 +378,7 @@ router.get("/files/:uuid/:id", validateUUID, async (req, res) => {
     res.status(500).json({ error: "Failed to fetch file." });
   }
 });
+
 
 // NEW: DELETE /api/files/:uuid/:id endpoint to delete a file record and file from disk
 router.delete("/files/:uuid/:id", validateUUID, async (req, res) => {
