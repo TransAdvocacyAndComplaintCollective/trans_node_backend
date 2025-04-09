@@ -624,4 +624,41 @@ router.post('/upload-files', upload.array('fileUpload[]', 5), async (req, res) =
   }
 });
 
+// DELETE /api/files/:id endpoint
+router.delete("/files/:id", async (req, res) => {
+  const { id } = req.params;
+  // First, get the file details (like file path) from the database
+  const selectQuery = `SELECT filePath FROM file_uploads WHERE id = ?;`;
+  try {
+    const [rows] = await db.promise().query(selectQuery, [id]);
+    if (rows.length === 0) {
+      return res.status(404).json({ error: "File not found." });
+    }
+
+    const filePath = rows[0].filePath;
+
+    // Delete the file record from the database
+    const deleteQuery = `DELETE FROM file_uploads WHERE id = ?;`;
+    await db.promise().query(deleteQuery, [id]);
+
+    // Optionally, delete the file from the disk
+    fs.access(filePath, fs.constants.F_OK, async (err) => {
+      if (!err) {
+        try {
+          await unlinkAsync(filePath);
+          console.log(`File ${filePath} deleted from disk.`);
+        } catch (unlinkErr) {
+          console.error("Error deleting file from disk:", unlinkErr);
+        }
+      }
+    });
+
+    res.status(200).json({ message: "File deleted successfully." });
+  } catch (err) {
+    console.error("Error deleting file:", err.message);
+    res.status(500).json({ error: "Failed to delete file." });
+  }
+});
+
+
 module.exports = router;
