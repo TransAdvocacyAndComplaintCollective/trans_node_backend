@@ -355,8 +355,7 @@ router.get("/files/:uuid", validateUUID, (req, res) => {
   });
 });
 
-
-// NEW: GET /api/files/:uuid/:id endpoint to serve file contents
+// GET /api/files/:uuid/:id endpoint to serve file contents
 router.get("/files/:uuid/:id", validateUUID, async (req, res) => {
   const { uuid, id } = req.params;
   const query = `SELECT filePath, originalName FROM file_uploads WHERE taccRecordId = ? AND id = ?;`;
@@ -366,7 +365,6 @@ router.get("/files/:uuid/:id", validateUUID, async (req, res) => {
       return res.status(404).json({ error: "File not found." });
     }
     const { filePath, originalName } = rows[0];
-    // Use res.download to ensure the file is downloaded with the correct filename and extension.
     return res.download(path.resolve(filePath), originalName, (err) => {
       if (err) {
         console.error("Error downloading file:", err);
@@ -379,11 +377,9 @@ router.get("/files/:uuid/:id", validateUUID, async (req, res) => {
   }
 });
 
-
-// NEW: DELETE /api/files/:uuid/:id endpoint to delete a file record and file from disk
+// DELETE /api/files/:uuid/:id endpoint to delete a file record and file from disk
 router.delete("/files/:uuid/:id", validateUUID, async (req, res) => {
   const { uuid, id } = req.params;
-  // Get file details from database
   const selectQuery = `SELECT filePath FROM file_uploads WHERE taccRecordId = ? AND id = ?;`;
   try {
     const [rows] = await db.promise().query(selectQuery, [uuid, id]);
@@ -391,10 +387,8 @@ router.delete("/files/:uuid/:id", validateUUID, async (req, res) => {
       return res.status(404).json({ error: "File not found." });
     }
     const filePath = rows[0].filePath;
-    // Delete file record from database
     const deleteQuery = `DELETE FROM file_uploads WHERE id = ?;`;
     await db.promise().query(deleteQuery, [id]);
-    // Optionally delete file from disk
     fs.access(filePath, fs.constants.F_OK, async (err) => {
       if (!err) {
         try {
@@ -580,7 +574,9 @@ router.get("/problematic", (req, res) => {
   });
 });
 
-// POST endpoint to store replies
+// ---------------------------------------------
+// UPDATED: POST endpoint to store replies along with file uploads
+// ---------------------------------------------
 router.post("/replies", upload.any(), (req, res) => {
   const { bbc_ref_number, intercept_id, bbc_reply } = req.body;
   if (!intercept_id || !bbc_reply) {
@@ -609,7 +605,46 @@ router.post("/replies", upload.any(), (req, res) => {
         console.error("Error storing reply:", insertErr.message);
         return res.status(500).json({ error: "Failed to store reply.", details: insertErr.message });
       }
-      res.status(200).json({ message: "Reply stored successfully.", id: insertResult.insertId });
+      // Process file attachments (if any) and insert into file_uploads table
+      let fileInsertPromises = [];
+      if (req.files && req.files.length > 0) {
+        req.files.forEach((file) => {
+          // Use fileTitle from the form or a default label for a reply attachment
+          let fileTitle = req.body.fileTitle || "Reply Attachment";
+          let fileInsertQuery = `
+            INSERT INTO file_uploads (taccRecordId, fileTitle, originalName, filename, filePath)
+            VALUES (?, ?, ?, ?, ?);
+          `;
+          fileInsertPromises.push(new Promise((resolve, reject) => {
+            db.query(fileInsertQuery, [intercept_id, fileTitle, file.originalname, file.filename, file.path], (fileErr, fileResult) => {
+              if (fileErr) {
+                console.error("Error inserting file for reply:", fileErr.message);
+                return reject(fileErr);
+              }
+              resolve({
+                id: fileResult.insertId,
+                originalName: file.originalname,
+                filename: file.filename,
+                fileUrl: `/api/files/${intercept_id}/${fileResult.insertId}`
+              });
+            });
+          }));
+        });
+      }
+      Promise.all(fileInsertPromises)
+        .then(filesData => {
+          let responseData = {
+            message: "Reply stored successfully.",
+            id: insertResult.insertId
+          };
+          if (filesData.length > 0) {
+            responseData.files = filesData;
+          }
+          res.status(200).json(responseData);
+        })
+        .catch(fileErr => {
+          res.status(500).json({ error: "Reply stored but error storing attached files.", details: fileErr.message });
+        });
     });
   });
 });
@@ -649,10 +684,10 @@ router.post("/upload-files", upload.array("fileUpload[]", 5), async (req, res) =
       taccRecordId,
       fileTitle,
       files: files.map(file => ({
-        id: file.id || 0, // Note: Depending on your DB insertion method, you might need to return the inserted file IDs.
+        id: file.id || 0, // Replace with actual file id from DB if needed
         originalName: file.originalname,
         filename: file.filename,
-        fileUrl: `/api/files/${taccRecordId}/${/* file.id */"REPLACEME"}` // Replace with actual file id from DB, if available.
+        fileUrl: `/api/files/${taccRecordId}/${"REPLACEME"}`
       }))
     });
   } catch (error) {
