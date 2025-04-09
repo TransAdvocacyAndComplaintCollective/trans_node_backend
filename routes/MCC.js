@@ -581,7 +581,7 @@ router.get("/problematic", (req, res) => {
 });
 
 // POST endpoint to store replies
-router.post("/replies", (req, res) => {
+router.post("/replies", upload.any(), (req, res) => {
   const { bbc_ref_number, intercept_id, bbc_reply } = req.body;
   if (!intercept_id || !bbc_reply) {
     return res.status(400).json({ error: "Missing required fields." });
