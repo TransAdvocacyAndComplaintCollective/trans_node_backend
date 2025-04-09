@@ -355,7 +355,7 @@ router.get("/files/:uuid", validateUUID, (req, res) => {
   });
 });
 
-// GET /api/files/:uuid/:id endpoint to serve file contents
+// GET /api/files/:uuid/:id endpoint info about file
 router.get("/files/:uuid/:id", validateUUID, async (req, res) => {
   const { uuid, id } = req.params;
   const query = `SELECT filePath, originalName FROM file_uploads WHERE taccRecordId = ? AND id = ?;`;
@@ -365,11 +365,13 @@ router.get("/files/:uuid/:id", validateUUID, async (req, res) => {
       return res.status(404).json({ error: "File not found." });
     }
     const { filePath, originalName } = rows[0];
-    return res.download(path.resolve(filePath), originalName, (err) => {
-      if (err) {
-        console.error("Error downloading file:", err);
-        res.status(500).end();
-      }
+    return res.status(200).json({
+      id: id,
+      taccRecordId: uuid,
+      filePath: filePath,
+      originalName: originalName,
+      fileUrl: `/api/files/${uuid}/${id}`,
+      size: fs.statSync(filePath).size,
     });
   } catch (err) {
     console.error("Error fetching file details:", err.message);
@@ -575,7 +577,7 @@ router.get("/problematic", (req, res) => {
 });
 
 // ---------------------------------------------
-// UPDATED: POST endpoint to store replies along with file uploads
+// UPDATED: POST endpoint to store replies along with file uploads, with email check
 // ---------------------------------------------
 router.post("/replies", upload.any(), (req, res) => {
   const { bbc_ref_number, intercept_id, bbc_reply } = req.body;
@@ -586,7 +588,9 @@ router.post("/replies", upload.any(), (req, res) => {
   if (!uuidV4Pattern.test(intercept_id)) {
     return res.status(400).json({ error: "Invalid TACC Record ID format." });
   }
-  const checkInterceptIdQuery = "SELECT id FROM intercepted_data WHERE id = ? LIMIT 1;";
+  
+  // Query the record and check for associated email
+  const checkInterceptIdQuery = "SELECT emailaddress FROM intercepted_data WHERE id = ? LIMIT 1;";
   db.query(checkInterceptIdQuery, [intercept_id], (err, results) => {
     if (err) {
       console.error("Database error during intercept_id check:", err.message);
@@ -595,6 +599,12 @@ router.post("/replies", upload.any(), (req, res) => {
     if (results.length === 0) {
       return res.status(400).json({ error: "Invalid intercept_id. No matching record found." });
     }
+    // Ensure email exists before storing the reply.
+    // const email = results[0].emailaddress;
+    // if (!email || email.trim().length === 0 && req.files && req.files.length > 0) {
+    //   return res.status(400).json({ error: "An email address is required on the record before you can submit a reply with a file." });
+    // }
+    
     const sanitizedReply = sanitizeHtml(bbc_reply);
     const insertReplyQuery = `
       INSERT INTO replies (bbc_ref_number, intercept_id, bbc_reply)
@@ -649,6 +659,7 @@ router.post("/replies", upload.any(), (req, res) => {
   });
 });
 
+
 // POST endpoint for file uploads with validations and database storage
 router.post("/upload-files", upload.array("fileUpload[]", 5), async (req, res) => {
   try {
@@ -657,6 +668,17 @@ router.post("/upload-files", upload.array("fileUpload[]", 5), async (req, res) =
     if (!taccRecordId || !uuidV4Pattern.test(taccRecordId)) {
       return res.status(400).json({ error: "Invalid or missing TACC Record ID. Please provide a valid UUID v4." });
     }
+    
+    // // Check if the record exists and has an email address.
+    // const [records] = await db.promise().query("SELECT emailaddress FROM intercepted_data WHERE id = ?", [taccRecordId]);
+    // if (records.length === 0) {
+    //   return res.status(400).json({ error: "TACC Record ID does not exist in the system." });
+    // }
+    // const email = records[0].emailaddress;
+    // if (!email || email.trim().length === 0) {
+    //   return res.status(400).json({ error: "Email is required in the system before uploading files." });
+    // }
+    
     const files = req.files;
     if (!files || files.length === 0) {
       return res.status(400).json({ error: "No files uploaded." });
@@ -695,5 +717,6 @@ router.post("/upload-files", upload.array("fileUpload[]", 5), async (req, res) =
     res.status(500).json({ error: "Failed to upload files" });
   }
 });
+
 
 module.exports = router;
