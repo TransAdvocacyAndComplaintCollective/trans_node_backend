@@ -355,6 +355,7 @@ router.get("/files/:uuid", validateUUID, (req, res) => {
   });
 });
 
+
 // NEW: GET /api/files/:uuid/:id endpoint to serve file contents
 router.get("/files/:uuid/:id", validateUUID, async (req, res) => {
   const { uuid, id } = req.params;
