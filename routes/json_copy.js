@@ -162,26 +162,40 @@ router.post('/ask_for_access_token', async (req, res) => {
   if (!email) {
     return res.status(400).json({ error: 'Email is required' });
   }
+
   // Generate a unique access token
   const token = crypto.randomBytes(16).toString('hex');
-  // Store the token in the database with status 'active'
-  db.query('INSERT INTO access_tokens (token, email) VALUES (?, ?)', [token, email], (error, results) => {
-    if (error) {
-      console.error('Error inserting token:', error);
-      return res.status(500).json({ error: 'Failed to store access token' });
-    }
-    // Send the token
-    nodemailer.createTransport(EmailConfigOptions).sendMail({
-    }).catch((error) => {
-      console.error('Error sending email:', error);
-      return res.status(500).json({ error: 'Failed to send email' });
-    }
-    ).then(() => {
-      console.log('Email sent successfully');
-      res.status(200).json({ message: 'Access token sent to email' });
-    });
-    // Send the email with the token
-  });
+
+  try {
+    // Store the token using a promise-based query
+    await db.promise().query(
+      'INSERT INTO access_tokens (token, email) VALUES (?, ?)',
+      [token, email]
+    );
+  } catch (dbError) {
+    console.error('Error inserting token:', dbError);
+    return res.status(500).json({ error: 'Failed to store access token' });
+  }
+
+  try {
+    // Configure the email transport and mail options.
+    const transporter = nodemailer.createTransport(EmailConfigOptions);
+    const mailOptions = {
+      from: emailUserName,  // Ensure this is a valid sender address.
+      to: email,            // Email recipient from the request.
+      subject: 'Your Access Token',
+      text: `Your access token is: ${token}`,
+    };
+
+    // Use await to send the email and capture the response.
+    const info = await transporter.sendMail(mailOptions);
+    console.log('Email sent successfully:', info.response);
+
+    return res.status(200).json({ message: 'Access token sent to email' });
+  } catch (emailError) {
+    console.error('Error sending email:', emailError);
+    return res.status(500).json({ error: 'Failed to send email' });
+  }
 });
 
 
