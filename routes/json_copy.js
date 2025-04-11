@@ -142,7 +142,7 @@ function setupDatabase() {
   // sweep old tokens every 24 hours
   setInterval(() => {
     db.query(`
-      DELETE FROM access_tokens WHERE created_at < NOW() - INTERVAL 1 DAY
+      DELETE FROM access_tokens WHERE created_at >= NOW() - INTERVAL 1 HOUR
     `, (error, results) => {
       if (error) {
         console.error('Error deleting old tokens:', error);
@@ -366,5 +366,28 @@ router.post('/fake_data', express.json(), upload.single(FILE_UPLOAD_KEY), async 
     res.status(500).json({ error: 'Failed to save fake data' });
   }
 });
+
+router.get("/fake_data/:name", async (req, res) => {
+  const { name } = req.params;
+  const sanitizedFilename = sanitizeFilename(name);
+  try {
+    const data = await readFakeData(sanitizedFilename);
+    if (data !== null) {
+      try {
+        const parsedData = JSON.parse(data);
+        return res.status(200).json({ message: 'Fake data found', data: parsedData });
+      } catch (parseError) {
+        return res.status(200).json({ message: 'Fake data found', data });
+      }
+    } else {
+      return res.status(404).json({ error: 'Fake data not found' });
+    }
+  } catch (error) {
+    return res.status(500).json({ error: 'Failed to retrieve fake data', details: error.message });
+  }
+});
+
+
+
 
 module.exports = router;
